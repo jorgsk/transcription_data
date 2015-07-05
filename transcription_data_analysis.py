@@ -1,9 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from ipdb import set_trace as debug  # NOQA
 from operator import attrgetter
 import data_handler
-from scipy.stats import spearmanr, pearsonr, nanmean, nanstd, nanmedian  # NOQA
+from pandas import DataFrame as df
+from scipy.stats import spearmanr, nanmean
 import os
+
+# Where you are
+package_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Specify better colors than the 'ugh' default colors in matplotlib
 import brewer2mpl
@@ -36,13 +41,11 @@ def ap_distribution(dg100, dg400):
     Distribution of AP across all ITSs
     """
 
-    from pandas import DataFrame as df
-
     for dset_name, ITSs in [('DG100', dg100), ('DG400', dg400)]:
         #if dset_name == 'DG400':
             #for its in ITSs:
                 #its.abortiveProb = its.abortiveProb*2
-        dsetmean = np.nanmean([i.PY for i in ITSs])
+        dsetmean = nanmean([i.PY for i in ITSs])
         if dset_name == 'DG100':
             rna_range = range(2, 21)
         else:
@@ -76,13 +79,12 @@ def raw_data_distribution(dg100, dg400):
     """
     Distribution of raw radiactive intensity across all ITSs
     """
-    from pandas import DataFrame as df
 
     for dset_name, ITSs in [('DG100', dg100), ('DG400', dg400)]:
         #if dset_name == 'DG400':
             #for its in ITSs:
                 #its.abortiveProb = its.abortiveProb*2
-        dsetmean = np.nanmean([i.PY for i in ITSs])
+        dsetmean = nanmean([i.PY for i in ITSs])
         if dset_name == 'DG100':
             rna_range = range(2,21)
             ymax = 2*10**7
@@ -189,7 +191,6 @@ def basic_info(ITSs):
     #for nt, nr_nt in zip(nts, nr_nts):
         #print nt, spearmanr(msats, nr_nt)
 
-    #debug()
     avg_corr = []
     np_corr = []
 
@@ -202,7 +203,7 @@ def basic_info(ITSs):
     #for x in rna_lenghts:
         #lad_np = [sum(ladder_pre[i][:x]) for i in range(len(ladder_pre))]
         ##avg_kbt = [np.mean(i.keq[:x]) for i in ITSs]
-        #measure_values = [np.nanmean(i.keq[:x-1]) for i in ITSs]
+        #measure_values = [nanmean(i.keq[:x-1]) for i in ITSs]
         #np_corr.append(spearmanr(py, lad_np)[0])
         #avg_corr.append(spearmanr(py, measure_values)[0])
 
@@ -210,7 +211,7 @@ def basic_info(ITSs):
     for x in rna_lenghts:
         lad_np = [sum(ladder_pre[i][12:x]) for i in range(len(ladder_pre))]
         #avg_kbt = [np.mean(i.keq[:x]) for i in ITSs]
-        measure_values = [np.nanmean(i.keq[12:x-1]) for i in ITSs]
+        measure_values = [nanmean(i.keq[12:x-1]) for i in ITSs]
         np_corr.append(spearmanr(py, lad_np)[0])
         avg_corr.append(spearmanr(py, measure_values)[0])
 
@@ -923,8 +924,8 @@ def various_analyses(dg100, dg400):
     """
 
     # basic correlations
-    basic_info(dg100)
-    basic_info(dg400)
+    #basic_info(dg100)
+    #basic_info(dg400)
 
     #ap_distribution(dg100, dg400)
     #raw_data_distribution(dg100, dg400)
@@ -963,6 +964,46 @@ def various_analyses(dg100, dg400):
 
     # moving average of AP vs PY/FL/TA
     #moving_average_ap(dg100, dg400)
+
+    # Abortive profile of each variant
+    abortive_profiles(dg100, dg400)
+
+
+def abortive_profiles(dg100, dg400):
+    """
+    Write to disk abortive profiles for all variants.
+
+    For DG100, the overall shape is higly similar to the distributions in
+    Figure 6B, except the 2-nt band which is lower than in Fig. 6B. Since the
+    2nt-band is lower, the subsequent bands get associated with a higher AP
+    compared to Fig 6B. Perhaps with kinetic data we can figure this out?
+    """
+
+    for dset_name, ITSs in [('DG100', dg100), ('DG400', dg400)]:
+
+        write_dir = os.path.join(package_dir, 'AP_profiles', dset_name)
+
+        if not os.path.isdir(write_dir):
+            os.makedirs(write_dir)
+
+        for its in ITSs:
+            name = its.name.replace('/', '-')
+            file_path = os.path.join(write_dir, name + '_AP_profile.pdf')
+            aps = its.abortiveProb
+            indx = range(2, len(aps)+2)
+
+            fig, ax = plt.subplots()
+            mydf = df(data=aps * 100., index=indx)
+
+            mydf.plot(kind='bar', ax=ax)
+
+            ax.set_xlabel('ITS position')
+            ax.set_ylabel('Abortive probability (\%)')
+
+            ax.set_ylim(0, 100)
+
+            fig.savefig(file_path, format='pdf')
+            plt.close(fig)
 
 
 def main():
