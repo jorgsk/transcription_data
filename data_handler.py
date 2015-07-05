@@ -1,11 +1,13 @@
 from __future__ import division
-import Workhouse
 import pandas
 from numpy import ndarray
 import os
 
 from ITSframework import ITS
 from ipdb import set_trace as debug  # NOQA
+
+# We store files relative to this directory
+package_directory = os.path.dirname(os.path.abspath(__file__))
 
 
 def StringOrFloat(incoming):
@@ -35,7 +37,7 @@ def PYHsu_oldcsv(filepath):
     """ Read Hsu dg100 csv-file with PY etc data. """
     f = open(filepath, 'rb')
     a = csv.reader(f, delimiter='\t')
-    b = [[Workhouse.StringOrFloat(v) for v in row] for row in a]
+    b = [[StringOrFloat(v) for v in row] for row in a]
     f.close()
 
     lizt = [[row[0], row[1], row[2], row[3], row[4], row[6], row[8], row[10],
@@ -58,17 +60,15 @@ def read_raw(path, files, dset, skipN25=False):
     # 2) test assert that there is a match between the names in the sequence
     # file and the names in the should I?
 
-    cwd = '/home/jorgsk/Dropbox/phdproject/transcription_initiation/kinetic_model/'
-
     ITSs = {}
     seqs = {}
 
     # specify the location of the ITS DNA sequence
     if dset == 'dg400':
-        seq_file = cwd + 'output_seqs/tested_seqs.txt'
+        seq_file = os.path.join(package_directory, 'sequence_data/tested_seqs_dg400.txt')
 
     if dset == 'dg100':
-        seq_file = cwd + 'sequence_data/Hsu/dg100Seqs'
+        seq_file = os.path.join(package_directory, 'sequence_data/Hsu/dg100Seqs')
 
     for line in open(seq_file, 'rb'):
         variant, seq = line.split()
@@ -147,7 +147,8 @@ def add_AP(ITSs):
     Parse the AP file for the DG100 library and get the AP in there
     """
     dg100ap = 'Hsu_original_data/AbortiveProbabilities/abortiveProbabilities_mean.csv'
-    APs = pandas.read_csv(dg100ap, index_col=0).fillna(value=-999)
+    full_path = os.path.join(package_directory, dg100ap)
+    APs = pandas.read_csv(full_path, index_col=0).fillna(value=-999)
     for its in ITSs:
         its.abortiveProb = APs[its.name].tolist()
 
@@ -173,15 +174,14 @@ def ReadData(dataset):
 
     dg400 also uses raw transcription data.
     """
-    cwd = '/home/jorgsk/Dropbox/phdproject/transcription_initiation/kinetic_model/'
 
     # Selecting the dataset you want to use
     if dataset == 'dg100':
-        path = cwd + 'sequence_data/Hsu/csvHsu'
+        path = os.path.join(package_directory, 'sequence_data/Hsu/csvHsu')
         ITSs = ReadDG100Old(path)
 
     elif dataset == 'dg100-new':
-        path = cwd + 'Hsu_original_data/2006/2013_email'
+        path = os.path.join(package_directory, 'Hsu_original_data/2006/2013_email')
         files = {'1122_first':  'quant1122.csv',
                  '1207_second': 'quant1207.csv',
                  '1214_third':  'quant1214.csv'}
@@ -191,7 +191,7 @@ def ReadData(dataset):
 
         # read its-data the "old" way just to get msat and copy msat to ITSs
         # read the 'new' way
-        oldcsvpath = cwd + 'sequence_data/Hsu/csvHsu'
+        oldcsvpath = os.path.join(package_directory, 'sequence_data/Hsu/csvHsu')
         ITSs_oldcsv = PYHsu_oldcsv(oldcsvpath)
         for its_name in ITSs:
             for its_old in ITSs_oldcsv:
@@ -199,7 +199,7 @@ def ReadData(dataset):
                     ITSs[its_name].msat = its_old.msat
 
     elif dataset == 'dg400':
-        path = cwd + 'prediction_experiment/raw_data'
+        path = os.path.join(package_directory, 'prediction_experiment/raw_data')
         files = {'16_first':  'quant16_raw.csv',
                  '27_second': 'quant27_raw.csv',
                  '23_first':  'quant23_raw.csv'}
