@@ -60,6 +60,9 @@ def read_raw(path, files, dset, skipN25=False):
     # 2) test assert that there is a match between the names in the sequence
     # file and the names in the should I?
 
+    # XXX TODO HERE fix the N25/A1 anti stuff once and for all. Don't have
+    # path deliminters in IDs.
+
     ITSs = {}
     seqs = {}
 
@@ -75,18 +78,18 @@ def read_raw(path, files, dset, skipN25=False):
 
         # special case to catch spelling
         if variant.endswith('A1anti'):
-            seqs['N25/A1anti'] = seq
+            seqs['N25-A1anti'] = seq
         else:
             seqs[variant] = seq
 
     for fNr, fName in files.items():
         target = os.path.join(path, fName)
-        rawData = pandas.read_csv(target, index_col=0)
+        from_file = pandas.read_csv(target, index_col=0)
 
         # 2-mer to 22-mer, depending on the gel.
-        labels = [i for i in rawData.index if not i.startswith('F')]
+        labels = [i for i in from_file.index if not i.startswith('F')]
 
-        for variant in rawData:
+        for variant in from_file:
 
             # skip all N25s if requested
             if skipN25 and 'N25' in variant:
@@ -98,7 +101,7 @@ def read_raw(path, files, dset, skipN25=False):
             # less, because in 2 replicas there was no signal.
             # But, when you look at average AP for ALL its, you WANT to perform a nanmean
             # The solution is then to subsitute 0 for nan when doing that.
-            entry = rawData[variant].fillna(value=-0)
+            entry = from_file[variant].fillna(value=-0)
 
             # deal with replicas that contain a '.'
             replica = ''
@@ -118,7 +121,7 @@ def read_raw(path, files, dset, skipN25=False):
                     var = variant[:-1]
                     itsObj = ITSs[var]
                 else:
-                    itsObj = ITS(seqs[variant], variant)
+                    itsObj = ITS(seqs[variant], name=variant)
                     ITSs[variant] = itsObj
 
             saveas = str(fNr)
@@ -127,7 +130,7 @@ def read_raw(path, files, dset, skipN25=False):
 
             # get the raw reads for each x-mer
             rawReads = [entry[l] for l in labels]
-            itsObj.rawData[saveas] = rawReads
+            itsObj.rawAbortive[saveas] = rawReads
             itsObj.fullLength[saveas] = entry['FL']  # first gel has FL2?
             itsObj.quantitations.append(saveas)
 
@@ -137,7 +140,9 @@ def read_raw(path, files, dset, skipN25=False):
         itsObj.calc_PY()
         itsObj.averageRawDataAndFL()
         itsObj.calc_AbortiveYield()
+        itsObj.calc_pct_yield()
         itsObj.labels = labels
+        itsObj.calc_AP_unproductive()
 
     return ITSs
 
@@ -194,6 +199,7 @@ def ReadData(dataset):
         oldcsvpath = os.path.join(package_directory, 'sequence_data/Hsu/csvHsu')
         ITSs_oldcsv = PYHsu_oldcsv(oldcsvpath)
         for its_name in ITSs:
+            #  Rename here as well ...
             for its_old in ITSs_oldcsv:
                 if its_name == its_old.name:
                     ITSs[its_name].msat = its_old.msat
