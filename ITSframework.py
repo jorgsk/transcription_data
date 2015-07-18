@@ -8,41 +8,53 @@ import numpy as np
 import Energycalc as Ec
 from ipdb import set_trace as debug  # NOQA
 
+# So you can import optiom for calc Keq
+import sys
+sys.path.append('/home/jorgsk/Dropbox/phdproject/transcription_initiation/equilibrium/')
+
 
 class ITS(object):
 
-    def __init__(self, sequence, name='noname', PY=-1, PY_std=-1, apr=-1, msat=-1):
+    def __init__(self, sequence, name='noname', PY=-1, PY_std=-1, APR=-1, msat=-1):
         # Set the initial important data.
         self.name = name
         # sequence is the non-template strand == the "same as RNA-strand"
+        # ASSUMING 2006 DNA fragment here
         self.sequence = sequence + 'TAAATATGGC'
         self.PY = PY
         self.PY_std = PY_std
-        self.APR = apr
+        self.APR = APR
         self.msat = int(msat)
 
         # For N25 from Vo et. al 2003
         # 63% unproductive is about 1.75 times more than unproductive + productive
-        self.unproductive_pct_yield = np.asarray([63.0, 16.0, 9.0, 2.2, 3.4,
+        self.N25_unproductive_pct_yield = np.asarray([63.0, 16.0, 9.0, 2.2, 3.4,
             1.5, 3.0, 0.9, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-        # These are optional data which are used if the raw quantitations are available
+        self.N25_GreB_pct_yield = np.asarray([60.4, 8.7, 7.9, 1.4, 0.9, 0.4, 1.0, 0.5, 0.2,
+                                    0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 18.5])
+
+        # Name of quantitations used to calculate AP, PY, etc.
         self.quantitations = []
-        # all data lists go from RNA-mer 2 to 21
-        self.abortiveProb = []  # mean
-        self.abortiveProb_std = []  # std
+
+        # Three ways of calculating abortive probability... find the diff
+        self.abortiveProb_old = -1
+        self.abortiveProb_std_old = -1  # std
+        self.abortive_prob = -1  # first normalizing, then averaging, then AP
+        self.abortive_prob_first_mean = -1  # first averaging signal, then AP
 
         # Raw quants
         self.rawAbortive = {}       # one entry for each quantitation
-        self.rawAbortiveMean = -1   # one entry for each quantitation
-        self.rawAbortiveStd = -1    # one entry for each quantitation
-        self.abortive_pct = -1  # percent abortive transcript
 
         # FL
         self.fullLength = {}
-        self.fullLengthMean = -1
-        self.fullLengthStd = -1
-        self.full_length_pct = -1  # percent FL transcript
+
+        # Mean fraction (abortive + FL) and raw data (abortive + FL)
+        self.fraction = -1
+        self.mean_raw_data = -1
+        # Mean abortive fraction fraction[:-1] and re-normalized (/.sum())
+        self.abortive_fraction = -1
+        self.abortive_fraction_normal = -1
 
         # The SE sum of equilibrium constants (Keqs)
         self.SE = -1
@@ -67,22 +79,6 @@ class ITS(object):
     def __repr__(self):
         return "{0}, PY: {1}".format(self.name, self.PY)
 
-    def averageRawDataAndFL(self):
-        """
-        More averaging and stding
-        """
-
-        if not self.sane():
-            return
-
-        # average mean
-        self.fullLengthMean = np.mean(self.fullLength.values())
-        self.fullLengthStd = np.std(self.fullLength.values())
-
-        # average raw data
-        self.rawAbortiveMean = np.mean(self.rawAbortive.values(), axis=0)
-        self.rawAbortiveStd = np.std(self.rawAbortive.values(), axis=0)
-
     def sane(self):
         """
         Verify that raw abortive data and full length data are in place
@@ -102,6 +98,11 @@ class ITS(object):
     def calc_PY(self):
         """
         Use the raw data to calculate PY (mean and std)
+
+        Damnit. Again, as for AP, there are these different ways of
+        calculating PY. And again, the best method is probably first to
+        normalize all data. But that's what I'm doing! I'm normalizing with
+        totalRNA for each quantitation, then averaging the PYs. OK, sweet.
         """
 
         if not self.sane():
@@ -117,6 +118,26 @@ class ITS(object):
 
         self.PY = np.mean([py for py in self._PYraw.values()])
         self.PY_std = np.std([py for py in self._PYraw.values()])
+
+    def calc_MSAT(self):
+        """
+        MSAT is read from Hsu. 2006 but we can calculate it from the %
+        transcripts. Here, assume MSAT is the position b
+        """
+
+        # Get pc of ONLY the abortive fraction
+        abortive_only_pct = 100 * self.abortive_fraction_normal
+        # Calculate the % RNA longer than i
+        pct_longer_than = 100. - np.cumsum(abortive_only_pct)
+
+        # Accept as MSAT the position where less than 0.1% of RNA is left
+        limit = 0.1
+        indx = np.where(pct_longer_than < limit)[0][0]
+
+        # 2nt is index 0
+        # This link between index and value is really bad. Should use pandas
+        # from the beginning with proper index ... damn it
+        self.calculated_msat = indx + 2
 
     def calc_AP_unproductive(self):
         """
@@ -138,33 +159,98 @@ class ITS(object):
         # Start of with the 1.75 or 80% rule and move on from there. It's
         # about the principle, not the details.
 
-        # self.abortive_pct is for all RNA; you just want the abortive %
-        pct_abortive = self.rawAbortiveMean * 100 / sum(self.rawAbortiveMean)
-
-        abortive_distribution_after_2nt = self.rawAbortiveMean[1:] / sum(self.rawAbortiveMean[1:])
+        abortive_frac_after_2nt = self.abortive_fraction_normal[1:]
 
         # estimate non-productive abortive % for 2nt RNA (dinucleoside tetraphosphate?)
-        nonprod_2nt_est = pct_abortive[0] * 1.75
+        nonprod_2nt_est = self.fraction[0] * 1.75
         nonprod_2nt_est = min(nonprod_2nt_est, 80.0)  # None above 80% (Vo 2003)
         nonprod_2nt_est = max(nonprod_2nt_est, 60.0)  # None below 60% (Vo 2003)
 
         # what remains to be spread over the rest
         remaining = 100. - nonprod_2nt_est
-        the_rest = remaining * abortive_distribution_after_2nt
+        the_rest = remaining * abortive_frac_after_2nt
 
         # nonproductive pct
-        nonprod_pct = np.asarray([nonprod_2nt_est] + the_rest.tolist())
+        self.nonproductive_pct = np.asarray([nonprod_2nt_est] + the_rest.tolist())
         # So, 0.09 % of abortive RNA comes from the +18 position
 
-        ap = calc_abortive_probability(nonprod_pct)
+        ap = self.calc_abortive_probability(self.nonproductive_pct)
 
         assert sum(ap > 1) == 0
 
         self.unproductive_ap = ap
 
+    def calc_AP_GreB(self):
+        """
+        Use raw data from GreB+ experiments to calculate AP.
+        """
+
+        ap = self.calc_abortive_probability(self.N25_GreB_pct_yield)
+
+        self.abortive_prob_GreB = ap
+
     def calc_AP(self):
         """
-        Use the raw data to calculate AP (mean and std)
+        Calc AP using two different methods. One methods first normalizes each
+        quantiation and then averages the normalized values. This is to take
+        account for different total signal, but preserving the relative
+        signal. I think that is the best method, really. The slight challenge
+        is that we are averaging fractions that have different denominators;
+        but, since the denominator is Total RNA, it does not matter.
+
+        The other approach is to first average all signals and then calculate
+        AP of the averaged signal. This is more correct in a sense, but if
+        some quantitations show an important trend but has lower total signal
+        , for example due to radioactive decay, then that trend will be lost.
+        """
+
+        normalized = {}
+        raw_data = {}
+
+        # go through each quantitation
+        for quant in self.quantitations:
+
+            # Read raw transcript data
+            raw_abortive = np.asarray(self.rawAbortive[quant])
+            raw_FL = self.fullLength[quant]
+            # add together
+            all_data = np.append(raw_abortive, raw_FL)
+            assert np.isnan(all_data).sum() == 0
+            # normalize
+            normalized[quant] = all_data / all_data.sum()
+            # Just add raw data
+            raw_data[quant] = np.append(raw_abortive, raw_FL)
+
+        # Calculate the respective means
+        self.fraction = np.mean(normalized.values(), axis=0)
+        self.fraction_std = np.std(normalized.values(), axis=0)
+        # Also set the abortive fraction only, since this is used alot
+        self.abortive_fraction = self.fraction[:-1]
+        self.abortive_fraction_normal = self.abortive_fraction / self.abortive_fraction.sum()
+
+        self.mean_raw_data = np.mean(raw_data.values(), axis=0)
+
+        # calculate the two APs
+        self.abortive_prob = self.calc_abortive_probability(self.fraction)
+        self.abortive_prob_first_mean = self.calc_abortive_probability(self.mean_raw_data)
+
+        assert sum([1 for ap in self.abortive_prob if ap < 0]) == 0
+        assert sum([1 for ap in self.abortive_prob_first_mean if ap < 0]) == 0
+
+    def calc_AP_old(self):
+        """
+        Use the raw data to calculate AP (mean and std).
+
+        And then average the AP for the different quantitations. This seems
+        like a wrong approach at first, but it has some merit. For example,
+        the IQ raw data from each experiment may not be comparable. So if an
+        important trend is present in a sample which has for some reason has
+        lower IQ values, then this trend will not make a contribution if the
+        raw IQ values are averaged.
+
+        You need to compare the three methods: and perhaps stick with the one
+        that produces the least variance?? :S Naah, that is not a good measure
+        here.
         """
 
         if not self.sane():
@@ -173,7 +259,6 @@ class ITS(object):
         # store the AP for each quantitation
         self._APraw = {}
         self.totAbort = {}
-        self.totRNA = {}
 
         # go through each quantitation
         for quant in self.quantitations:
@@ -186,18 +271,18 @@ class ITS(object):
             all_data = np.append(raw_abortive, raw_FL)
 
             # calculate APs
-            aps = calc_abortive_probability(all_data)
+            aps = self.calc_abortive_probability(all_data)
 
             # Do not save AP of FL
             self._APraw[quant] = aps[:-1]
 
-        self.abortiveProb = np.nanmean(self._APraw.values(), axis=0)
-        self.abortiveProb_std = np.nanstd(self._APraw.values(), axis=0)
+        self.abortiveProb_old = np.nanmean(self._APraw.values(), axis=0)
+        self.abortiveProb_std_old = np.nanstd(self._APraw.values(), axis=0)
 
         self.totAbortMean = np.nanmean(self.totAbort.values(), axis=0)
 
         # test, no abortive probability should be less than zero
-        assert sum([1 for ap in self.abortiveProb if ap < 0]) == 0
+        assert sum([1 for ap in self.abortiveProb_old if ap < 0]) == 0
 
     def calc_keq(self, c1, c2, c3, msat_normalization, rna_len):
         """
@@ -230,86 +315,58 @@ class ITS(object):
         """
         self.purines = [1 if nuc in ['G', 'A'] else 0 for nuc in self.sequence[:20]]
 
-    def calc_AbortiveYield(self):
+    def calc_abortive_probability(self, data):
         """
-        Calculate abortive to productive ratio
+        data: numpy array of transcript product, either in absolute or relative
+        numbers.
 
+        AP: probability than transcript will be aborted at the ith position.
+
+        Example:
+
+        RNA Yields:
+        Pos2: 40%
+        Pos3: 10%
+        Pos4: 30%
+        Pos5: 20% (FL)
+
+        So % RNAP is
+        Pos2: 100%
+        Pos3: 60%
+        Pos4: 50%
+        Pos5: 20% (FL)
+
+        So AP becomes
+        Pos2: 40/100 => 40%
+        Pos3: 10/60  => 16%
+        Pos2: 30/50  => 60%
+        Pos2: 20/20  => 100% (all transcript "aborts" at FL)
         """
-        if not self.sane():
-            return
 
-        # store the PY for each quantitation
-        self._AYraw = {}
+        # Work with np arrays
+        data = np.asarray(data)
 
-        for quant in self.quantitations:
+        # Normalize data (does not matter if it is already normalized)
+        normdata = data / sum(data)
 
-            totalRNA = sum(self.rawAbortive[quant]) + self.fullLength[quant]
-            self._AYraw[quant] = self.rawAbortive[quant]/totalRNA
+        # Find frac RNAP remaining up until position i
+        frac_RNAP = np.asarray([np.sum(normdata[i:]) for i in range(data.size)])
 
-        self.AY = np.mean([py for py in self._AYraw.values()])
-        self.AY_std = np.std([py for py in self._AYraw.values()])
+        # Round. so that 0.001 becomes 0; so that 0.99999 becomes 1
+        frac_RNAP = np.round(frac_RNAP, 6)
 
-    def calc_pct_yield(self):
+        # Calc the APs
+        ap = normdata / frac_RNAP
 
-        # You have to have initialized these values
-        assert self.fullLengthMean != -1
+        # nan likely means 0/0
+        ap[np.isnan(ap)] = 0
 
-        total_rna = sum(self.rawAbortiveMean) + self.fullLengthMean
+        # We don't need no digits. Edit ...eeeh yes, you'll lose %ages that way.
+        # Ehm, nope, seems occasionally you get an AP of 1.0003 or 0.000001,
+        # which really should be 1 or 0.
+        ap = np.round(ap, 2)
 
-        self.full_length_pct = 100 * self.fullLengthMean / total_rna
-        self.abortive_pct = 100 * self.rawAbortiveMean / total_rna
-
-
-def calc_abortive_probability(data):
-    """
-    data: numpy array of transcript product, either in absolute or relative
-    numbers.
-
-    AP: probability than transcript will be aborted at the ith position.
-
-    Example:
-
-    RNA Yields:
-    Pos2: 40%
-    Pos3: 10%
-    Pos4: 30%
-    Pos5: 20% (FL)
-
-    So % RNAP is
-    Pos2: 100%
-    Pos3: 60%
-    Pos4: 50%
-    Pos5: 20% (FL)
-
-    So AP becomes
-    Pos2: 40/100 => 40%
-    Pos3: 10/60  => 16%
-    Pos2: 30/50  => 60%
-    Pos2: 20/20  => 100% (all transcript "aborts" at FL)
-    """
-
-    # Work with np arrays
-    data = np.asarray(data)
-
-    # Normalize data (does not matter if it is already normalized)
-    normdata = data / sum(data)
-
-    # Find frac RNAP remaining up until position i
-    frac_RNAP = np.asarray([np.sum(normdata[i:]) for i in range(data.size)])
-
-    # Round. so that 0.001 becomes 0; so that 0.99999 becomes 1
-    frac_RNAP = np.round(frac_RNAP, 6)
-
-    # Calc the APs
-    ap = normdata / frac_RNAP
-
-    # nan likely means 0/0
-    ap[np.isnan(ap)] = 0
-
-    # We don't need no digits
-    ap = np.round(ap, 2)
-
-    return ap
+        return ap
 
 
 if __name__ == '__main__':

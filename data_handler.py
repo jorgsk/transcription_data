@@ -136,13 +136,13 @@ def read_raw(path, files, dset, skipN25=False):
 
     # calculate AP and PY
     for name, itsObj in ITSs.items():
-        itsObj.calc_AP()
-        itsObj.calc_PY()
-        itsObj.averageRawDataAndFL()
-        itsObj.calc_AbortiveYield()
-        itsObj.calc_pct_yield()
         itsObj.labels = labels
+        itsObj.calc_AP()
+        itsObj.calc_AP_old()
+        itsObj.calc_PY()
         itsObj.calc_AP_unproductive()
+        itsObj.calc_AP_GreB()
+        itsObj.calc_MSAT()
 
     return ITSs
 
@@ -186,7 +186,7 @@ def ReadData(dataset):
         ITSs = ReadDG100Old(path)
 
     elif dataset == 'dg100-new':
-        path = os.path.join(package_directory, 'Hsu_original_data/2006/2013_email')
+        path = os.path.join(package_directory, 'Hsu_original_data/2006_paper/2013_email')
         files = {'1122_first':  'quant1122.csv',
                  '1207_second': 'quant1207.csv',
                  '1214_third':  'quant1214.csv'}
