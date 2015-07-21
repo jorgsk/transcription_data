@@ -26,13 +26,9 @@ class ITS(object):
         self.APR = APR
         self.msat = int(msat)
 
-        # For N25 from Vo et. al 2003
-        # 63% unproductive is about 1.75 times more than unproductive + productive
-        self.N25_unproductive_pct_yield = np.asarray([63.0, 16.0, 9.0, 2.2, 3.4,
-            1.5, 3.0, 0.9, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-        self.N25_GreB_pct_yield = np.asarray([60.4, 8.7, 7.9, 1.4, 0.9, 0.4, 1.0, 0.5, 0.2,
-                                    0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 18.5])
+        # N25 has a lot of extra data from additional experiments
+        if self.name == 'N25':
+            self.N25_specific_data()
 
         # Name of quantitations used to calculate AP, PY, etc.
         self.quantitations = []
@@ -79,6 +75,42 @@ class ITS(object):
     def __repr__(self):
         return "{0}, PY: {1}".format(self.name, self.PY)
 
+    def N25_specific_data(self):
+
+        # From Vo 2003: pct yield of unproductive complexes only
+        self.N25_unproductive_pct_yield = np.asarray([63.0, 16.0, 9.0, 2.2,
+                                                      3.4, 1.5, 3.0, 0.9, 0.9,
+                                                      0.0, 0.0, 0.0, 0.0, 0.0,
+                                                      0.0, 0.0, 0.0, 0.0,
+                                                      0.0])
+
+        self.N25_unproductive_ap = calc_abortive_probability(self.N25_unproductive_pct_yield)
+
+        # From Hsu 2006: pct yield when using GreB
+        self.N25_GreB_pct_yield = np.asarray([60.4, 8.7, 7.9, 1.4, 0.9, 0.4,
+                                              1.0, 0.5, 0.2, 0.1, 0.0, 0.0,
+                                              0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                              0.0, 18.5])
+
+        self.abortive_prob_GreB = calc_abortive_probability(self.N25_GreB_pct_yield)
+
+        # From Vo 2003:
+        vo03_ab_pct = np.asarray([33.95, 12.73, 12.43, 9.36, 11.41, 3.95,
+                                  10.09, 3.80, 1.76, 0, 0, 0, 0, 0, 0, 0, 0,
+                                  0, 0])
+
+        # What is the FL pct? Well, if the steady state reaction ran for 10
+        # minutes, the FL pct is around 12% according to Fig 12. B.
+        # So remove 12% from the aortive pct by weight and add to FL
+        fl_pct = 12
+        adjusted = vo03_ab_pct - fl_pct * vo03_ab_pct / 100.
+        adjusted[-1] = fl_pct
+        # But the 2nt pct and the FL pct is something you're changing later,
+        # so perhaps it does not matter so much what you put here.
+
+        self.vo03_fraction = adjusted / adjusted.sum()
+        self.vo03_ap = calc_abortive_probability(self.vo03_fraction)
+
     def sane(self):
         """
         Verify that raw abortive data and full length data are in place
@@ -97,12 +129,7 @@ class ITS(object):
 
     def calc_PY(self):
         """
-        Use the raw data to calculate PY (mean and std)
-
-        Damnit. Again, as for AP, there are these different ways of
-        calculating PY. And again, the best method is probably first to
-        normalize all data. But that's what I'm doing! I'm normalizing with
-        totalRNA for each quantitation, then averaging the PYs. OK, sweet.
+        Calculate PY (mean and std).
         """
 
         if not self.sane():
@@ -121,8 +148,9 @@ class ITS(object):
 
     def calc_MSAT(self):
         """
-        MSAT is read from Hsu. 2006 but we can calculate it from the %
-        transcripts. Here, assume MSAT is the position b
+        MSAT is read from Hsu. 2006 elsewhere, but we can calculate it from
+        the % transcripts. Here, assume MSAT is the position after which 0.1%
+        of RNA is left.
         """
 
         # Get pc of ONLY the abortive fraction
@@ -174,7 +202,7 @@ class ITS(object):
         self.nonproductive_pct = np.asarray([nonprod_2nt_est] + the_rest.tolist())
         # So, 0.09 % of abortive RNA comes from the +18 position
 
-        ap = self.calc_abortive_probability(self.nonproductive_pct)
+        ap = calc_abortive_probability(self.nonproductive_pct)
 
         assert sum(ap > 1) == 0
 
@@ -184,10 +212,6 @@ class ITS(object):
         """
         Use raw data from GreB+ experiments to calculate AP.
         """
-
-        ap = self.calc_abortive_probability(self.N25_GreB_pct_yield)
-
-        self.abortive_prob_GreB = ap
 
     def calc_AP(self):
         """
@@ -200,8 +224,8 @@ class ITS(object):
 
         The other approach is to first average all signals and then calculate
         AP of the averaged signal. This is more correct in a sense, but if
-        some quantitations show an important trend but has lower total signal
-        , for example due to radioactive decay, then that trend will be lost.
+        some quantitations show an important trend but has lower total signal,
+        for example due to radioactive decay, then that trend will be lost.
         """
 
         normalized = {}
@@ -231,8 +255,8 @@ class ITS(object):
         self.mean_raw_data = np.mean(raw_data.values(), axis=0)
 
         # calculate the two APs
-        self.abortive_prob = self.calc_abortive_probability(self.fraction)
-        self.abortive_prob_first_mean = self.calc_abortive_probability(self.mean_raw_data)
+        self.abortive_prob = calc_abortive_probability(self.fraction)
+        self.abortive_prob_first_mean = calc_abortive_probability(self.mean_raw_data)
 
         assert sum([1 for ap in self.abortive_prob if ap < 0]) == 0
         assert sum([1 for ap in self.abortive_prob_first_mean if ap < 0]) == 0
@@ -271,7 +295,7 @@ class ITS(object):
             all_data = np.append(raw_abortive, raw_FL)
 
             # calculate APs
-            aps = self.calc_abortive_probability(all_data)
+            aps = calc_abortive_probability(all_data)
 
             # Do not save AP of FL
             self._APraw[quant] = aps[:-1]
@@ -315,58 +339,59 @@ class ITS(object):
         """
         self.purines = [1 if nuc in ['G', 'A'] else 0 for nuc in self.sequence[:20]]
 
-    def calc_abortive_probability(self, data):
-        """
-        data: numpy array of transcript product, either in absolute or relative
-        numbers.
 
-        AP: probability than transcript will be aborted at the ith position.
+def calc_abortive_probability(data):
+    """
+    data: numpy array of transcript product, either in absolute or relative
+    numbers.
 
-        Example:
+    AP: probability than transcript will be aborted at the ith position.
 
-        RNA Yields:
-        Pos2: 40%
-        Pos3: 10%
-        Pos4: 30%
-        Pos5: 20% (FL)
+    Example:
 
-        So % RNAP is
-        Pos2: 100%
-        Pos3: 60%
-        Pos4: 50%
-        Pos5: 20% (FL)
+    RNA Yields:
+    Pos2: 40%
+    Pos3: 10%
+    Pos4: 30%
+    Pos5: 20% (FL)
 
-        So AP becomes
-        Pos2: 40/100 => 40%
-        Pos3: 10/60  => 16%
-        Pos2: 30/50  => 60%
-        Pos2: 20/20  => 100% (all transcript "aborts" at FL)
-        """
+    So % RNAP is
+    Pos2: 100%
+    Pos3: 60%
+    Pos4: 50%
+    Pos5: 20% (FL)
 
-        # Work with np arrays
-        data = np.asarray(data)
+    So AP becomes
+    Pos2: 40/100 => 40%
+    Pos3: 10/60  => 16%
+    Pos2: 30/50  => 60%
+    Pos2: 20/20  => 100% (all transcript "aborts" at FL)
+    """
 
-        # Normalize data (does not matter if it is already normalized)
-        normdata = data / sum(data)
+    # Work with np arrays
+    data = np.asarray(data)
 
-        # Find frac RNAP remaining up until position i
-        frac_RNAP = np.asarray([np.sum(normdata[i:]) for i in range(data.size)])
+    # Normalize data (does not matter if it is already normalized)
+    normdata = data / data.sum()
 
-        # Round. so that 0.001 becomes 0; so that 0.99999 becomes 1
-        frac_RNAP = np.round(frac_RNAP, 6)
+    # Find frac RNAP remaining up until position i
+    frac_RNAP = np.asarray([normdata[i:].sum() for i in range(data.size)])
 
-        # Calc the APs
-        ap = normdata / frac_RNAP
+    # Round. so that 0.001 becomes 0; so that 0.99999 becomes 1
+    frac_RNAP = np.round(frac_RNAP, 6)
 
-        # nan likely means 0/0
-        ap[np.isnan(ap)] = 0
+    # Calc the APs
+    ap = normdata / frac_RNAP
 
-        # We don't need no digits. Edit ...eeeh yes, you'll lose %ages that way.
-        # Ehm, nope, seems occasionally you get an AP of 1.0003 or 0.000001,
-        # which really should be 1 or 0.
-        ap = np.round(ap, 2)
+    # nan likely means 0/0
+    ap[np.isnan(ap)] = 0
 
-        return ap
+    # We don't need no digits. Edit ...eeeh yes, you'll lose %ages that way.
+    # Ehm, nope, seems occasionally you get an AP of 1.0003 or 0.000001,
+    # which really should be 1 or 0.
+    ap = np.round(ap, 2)
+
+    return ap
 
 
 if __name__ == '__main__':
