@@ -140,8 +140,7 @@ def read_raw(path, files, dset, skipN25=False):
         itsObj.calc_AP()
         itsObj.calc_AP_old()
         itsObj.calc_PY()
-        itsObj.calc_AP_unproductive()
-        itsObj.calc_AP_GreB()
+        #itsObj.calc_AP_unproductive()  # might come in handy later
         itsObj.calc_MSAT()
 
     return ITSs
