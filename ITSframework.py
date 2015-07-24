@@ -165,7 +165,7 @@ class ITS(object):
         # 2nt is index 0
         # This link between index and value is really bad. Should use pandas
         # from the beginning with proper index ... damn it
-        self.calculated_msat = indx + 2
+        self.msat_calculated = indx + 2
 
     def calc_AP_unproductive(self):
         """
