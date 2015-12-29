@@ -345,7 +345,7 @@ def calc_abortive_probability(data):
     data: numpy array of transcript product, either in absolute or relative
     numbers.
 
-    AP: probability than transcript will be aborted at the ith position.
+    AP: probability that transcript will be aborted at the ith position.
 
     Example:
 
@@ -366,6 +366,17 @@ def calc_abortive_probability(data):
     Pos3: 10/60  => 16%
     Pos2: 30/50  => 60%
     Pos2: 20/20  => 100% (all transcript "aborts" at FL)
+
+    Rationale:
+
+    Abortive probability at position i is given by:
+    AP_i = R_i / P_i, where R_i is the number of RNA aborted at position i and
+    P_i is the number of RNAPs that have reached position i. This is the same
+    as writing AP_i = R * r_i / P * p_i, where R is the total number of
+    aborted RNAs, and P is the total number of RNAPs, and r_i is the fraction
+    of RNAs aborting at position i, and p_i is the fraction of RNAPs reaching
+    position i. However, since each abortive RNA is associated with one RNAP,
+    we have that P = R, so that AP_i = r_i / p_i.
     """
 
     # Work with np arrays
